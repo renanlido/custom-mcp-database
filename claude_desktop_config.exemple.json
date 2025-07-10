@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "Custom DB Server": {
+      "command": "/your-path-to/custom-mcp-database/venv/bin/python",
+      "args": [
+        "/your-path-to/custom-mcp-database/main.py"
+      ],
+      "workingDirectory": "/your-path-to/custom-mcp-database"
+    }
+  }
+}

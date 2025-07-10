@@ -27,6 +27,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 GEMINI.md
+claude_desktop_config.json
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -127,3 +128,8 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# SQLite database files
+mcp_config.sqlite3
+mcp_config.sqlite3-shm
+mcp_config.sqlite3-wal

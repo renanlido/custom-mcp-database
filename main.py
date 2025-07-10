@@ -1,118 +1,108 @@
-import os
 import json
 import psycopg2
 import psycopg2.extras
 import mysql.connector
 import oracledb
+import argparse
 from pymongo import MongoClient
-from typing import Dict, Any, List, Optional
-from dotenv import load_dotenv
+from typing import Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
+import config_db
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Initialize the MCP server
+# Initialize the MCP server and the configuration database
 mcp = FastMCP()
+config_db.init_db()
 
-# --- Database Connection Logic (Helper Functions) ---
+# --- Helper Functions ---
 
-def get_db_configs():
-    configs = {}
-    # PostgreSQL
-    i = 1
-    while True:
-        alias = os.getenv(f"DB_POSTGRES_ALIAS_{i}")
-        if not alias: break
-        configs[alias] = {
-            "type": "postgres",
-            "conn_params": {
-                "host": os.getenv(f"DB_POSTGRES_HOST_{i}"),
-                "port": os.getenv(f"DB_POSTGRES_PORT_{i}", 5432),
-                "user": os.getenv(f"DB_POSTGRES_USER_{i}"),
-                "password": os.getenv(f"DB_POSTGRES_PASSWORD_{i}"),
-                "dbname": os.getenv(f"DB_POSTGRES_DBNAME_{i}"),
-            }
-        }
-        i += 1
-
-    # MySQL
-    i = 1
-    while True:
-        alias = os.getenv(f"DB_MYSQL_ALIAS_{i}")
-        if not alias: break
-        configs[alias] = {
-            "type": "mysql",
-            "conn_params": {
-                "host": os.getenv(f"DB_MYSQL_HOST_{i}"),
-                "port": os.getenv(f"DB_MYSQL_PORT_{i}", 3306),
-                "user": os.getenv(f"DB_MYSQL_USER_{i}"),
-                "password": os.getenv(f"DB_MYSQL_PASSWORD_{i}"),
-                "database": os.getenv(f"DB_MYSQL_DBNAME_{i}"),
-            }
-        }
-        i += 1
-    
-    # MongoDB
-    i = 1
-    while True:
-        alias = os.getenv(f"DB_MONGO_ALIAS_{i}")
-        if not alias: break
-        configs[alias] = {
-            "type": "mongo",
-            "uri": os.getenv(f"DB_MONGO_URI_{i}"),
-            "dbname": os.getenv(f"DB_MONGO_DBNAME_{i}"),
-        }
-        i += 1
-
-    # Oracle
-    i = 1
-    while True:
-        alias = os.getenv(f"DB_ORACLE_ALIAS_{i}")
-        if not alias: break
-        host = os.getenv(f"DB_ORACLE_HOST_{i}")
-        port = os.getenv(f"DB_ORACLE_PORT_{i}", 1521)
-        dbname = os.getenv(f"DB_ORACLE_DBNAME_{i}")
-        dsn = f"{host}:{port}/{dbname}"
+def _build_and_validate_params(
+    db_type: str,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+    dbname: Optional[str] = None,
+    uri: Optional[str] = None
+) -> Dict[str, Any]:
+    """Validates parameters and builds the params dictionary for storage."""
+    params = {}
+    if db_type == "mongo":
+        if not uri or not dbname:
+            raise ValueError("For MongoDB, 'uri' and 'dbname' are required.")
+        params = {"uri": uri, "dbname": dbname}
+    elif db_type in ["postgres", "mysql", "oracle"]:
+        if not all([host, port, user, password, dbname]):
+            raise ValueError(f"For {db_type}, 'host', 'port', 'user', 'password', and 'dbname' are required.")
         
-        configs[alias] = {
-            "type": "oracle",
-            "conn_params": {
-                "user": os.getenv(f"DB_ORACLE_USER_{i}"),
-                "password": os.getenv(f"DB_ORACLE_PASSWORD_{i}"),
-                "dsn": dsn,
-            }
-        }
-        i += 1
-    return configs
+        params = {"host": host, "port": port, "user": user, "password": password}
+        if db_type == "mysql":
+            params["database"] = dbname
+        else:
+            params["dbname"] = dbname
+        
+        if db_type == "oracle":
+            # Pop the standard host/port/dbname as they are now in the DSN
+            params["dsn"] = f"{params.pop('host')}:{params.pop('port')}/{params.pop('dbname')}"
+    else:
+        raise ValueError(f"Unsupported database type: {db_type}")
 
-# --- MCP Tool Definition ---
+    return params
+
+# --- MCP Tool Definitions ---
 
 @mcp.tool()
 def list_aliases() -> Dict[str, Any]:
     """
-    Lists all configured database aliases.
-    :return: A dictionary containing a list of database aliases.
+    Lists all configured database aliases and their types.
+    :return: A dictionary containing a list of database aliases and their types.
     """
-    db_configs = get_db_configs()
-    return {"aliases": list(db_configs.keys())}
+    db_configs = config_db.get_all_connections()
+    aliases_list = []
+    for alias, config in db_configs.items():
+        aliases_list.append({"alias": alias, "type": config.get("type")})
+    return {"aliases": aliases_list}
+
+@mcp.tool()
+def add_database(
+    alias: str,
+    db_type: str,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+    dbname: Optional[str] = None,
+    uri: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Adds a new database connection to the configuration.
+    For SQL types, requires: host, port, user, password, dbname.
+    For MongoDB, requires: uri, dbname.
+    """
+    params = _build_and_validate_params(db_type, host, port, user, password, dbname, uri)
+    config_db.add_connection(alias, db_type, params)
+    return {"status": f"Database '{alias}' added successfully."}
+
+@mcp.tool()
+def remove_database(alias: str) -> Dict[str, str]:
+    """
+    Removes a database connection from the configuration.
+    """
+    if config_db.remove_connection(alias):
+        return {"status": f"Database '{alias}' removed successfully."}
+    else:
+        raise ValueError(f"Database alias '{alias}' not found.")
 
 @mcp.tool()
 def execute_query(
     database_alias: str,
     query: str,
-    params: Optional[Dict[str, Any]] = None
+    params: Optional[Dict[str, Any]] = None,
+    schema: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Executes a query on a configured database and returns the result.
-
-    :param database_alias: The alias of the database to connect to (e.g., 'pg_local').
-    :param query: The SQL query or MongoDB find filter (as a JSON string) to execute.
-    :param params: For SQL, a dict of parameters to prevent injection. For MongoDB, a dict specifying the collection, e.g., {"collection": "my_collection"}.
-    :return: A dictionary containing the query result and row count.
     """
-    db_configs = get_db_configs()
-    db_info = db_configs.get(database_alias)
+    db_info = config_db.get_connection(database_alias)
 
     if not db_info:
         raise ValueError(f"Database alias '{database_alias}' not found in configuration.")
@@ -160,9 +150,10 @@ def execute_query(
         elif db_type == "oracle":
             with oracledb.connect(**db_info["conn_params"]) as conn:
                 with conn.cursor() as cursor:
+                    if schema:
+                        cursor.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema}")
                     cursor.execute(query, params or {})
                     if cursor.description:
-                        # Make rows accessible by column name
                         cursor.rowfactory = lambda *args: dict(zip([d[0].lower() for d in cursor.description], args))
                         result = cursor.fetchall()
                         return {"data": result, "row_count": len(result)}
@@ -174,8 +165,53 @@ def execute_query(
             raise ValueError(f"Unsupported database type: {db_type}")
 
     except Exception as e:
-        # Re-raise as a generic exception for the MCP client to handle
         raise RuntimeError(f"Query execution failed: {str(e)}") from e
 
+# --- Command-Line Interface (CLI) for Config Management ---
+
+def main_cli():
+    parser = argparse.ArgumentParser(description="MCP Database Server & Config CLI")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # 'run' command
+    subparsers.add_parser("run", help="Run the MCP server")
+
+    # 'add-db' command
+    parser_add = subparsers.add_parser("add-db", help="Add a new database connection")
+    parser_add.add_argument("--alias", required=True, help="Unique alias for the connection")
+    parser_add.add_argument("--type", required=True, choices=["postgres", "mysql", "oracle", "mongo"], help="Database type")
+    parser_add.add_argument("--host", help="DB host (not for mongo)")
+    parser_add.add_argument("--port", type=int, help="DB port (not for mongo)")
+    parser_add.add_argument("--user", help="DB user (not for mongo)")
+    parser_add.add_argument("--password", help="DB password (not for mongo)")
+    parser_add.add_argument("--dbname", help="DB name (for all types)")
+    parser_add.add_argument("--uri", help="MongoDB connection URI")
+
+    # 'remove-db' command
+    parser_remove = subparsers.add_parser("remove-db", help="Remove a database connection")
+    parser_remove.add_argument("--alias", required=True, help="Alias of the connection to remove")
+
+    args = parser.parse_args()
+
+    if args.command == "add-db":
+        try:
+            params = _build_and_validate_params(
+                db_type=args.type, host=args.host, port=args.port, user=args.user, 
+                password=args.password, dbname=args.dbname, uri=args.uri
+            )
+            config_db.add_connection(args.alias, args.type, params)
+            print(f"Database connection '{args.alias}' added successfully.")
+        except ValueError as e:
+            print(f"Error: {e}")
+    
+    elif args.command == "remove-db":
+        if config_db.remove_connection(args.alias):
+            print(f"Database connection '{args.alias}' removed successfully.")
+        else:
+            print(f"Error: Database alias '{args.alias}' not found.")
+    
+    elif args.command == "run" or args.command is None:
+        mcp.run()
+
 if __name__ == "__main__":
-    mcp.run()
+    main_cli()
