@@ -34,48 +34,60 @@ The server will start and listen for incoming requests from your code agents.
 
 ## 3. Database Configuration
 
-Database connections are stored in `mcp_config.sqlite3`. You can manage these connections using the `main.py` script via the command line.
+Database connections are stored in `mcp_config.sqlite3`. You can manage these connections using the global `mcp-db` command (recommended) or the local `main.py` script.
 
 ### Adding a Database Connection
 
 Use the `add-db` command. The required parameters vary by database type.
 
-**General Syntax:**
+**General Syntax (Global Command - Recommended):**
+
+```bash
+mcp-db add-db --alias <alias> --type <type> [connection_parameters]
+```
+
+**Alternative (Local Command):**
 
 ```bash
 python main.py add-db --alias <alias> --type <type> [connection_parameters]
 ```
 
-**Examples:**
+**Examples (Global Command):**
 
 * **PostgreSQL**:
 
     ```bash
-    python main.py add-db --alias pg_dev --type postgres --host localhost --port 5432 --user myuser --password mypassword --dbname mydb
+    mcp-db add-db --alias pg_dev --type postgres --host localhost --port 5432 --user myuser --password mypassword --dbname mydb
     ```
 
 * **MySQL**:
 
     ```bash
-    python main.py add-db --alias mysql_prod --type mysql --host 192.168.1.10 --port 3306 --user root --password secret --dbname production_db
+    mcp-db add-db --alias mysql_prod --type mysql --host 192.168.1.10 --port 3306 --user root --password secret --dbname production_db
     ```
 
 * **Oracle**:
 
     ```bash
-    python main.py add-db --alias oracle_test --type oracle --host oracle.example.com --port 1521 --user system --password oraclepass --dbname ORCLPDB1
+    mcp-db add-db --alias oracle_test --type oracle --host oracle.example.com --port 1521 --user system --password oraclepass --dbname ORCLPDB1
     ```
 
 * **MongoDB**:
 
     ```bash
-    python main.py add-db --alias mongo_cluster --type mongo --uri "mongodb+srv://user:pass@cluster.mongodb.net/" --dbname myapp_db
+    mcp-db add-db --alias mongo_cluster --type mongo --uri "mongodb+srv://user:pass@cluster.mongodb.net/" --dbname myapp_db
     ```
 
 ### Removing a Database Connection
 
 Use the `remove-db` command with the alias of the connection you want to remove:
 
+**Global Command:**
+```bash
+mcp-db remove-db --alias <alias>
+```
+
+**Local Command:**
 ```bash
 python main.py remove-db --alias <alias>
 ```
@@ -83,7 +95,16 @@ python main.py remove-db --alias <alias>
 **Example:**
 
 ```bash
-python main.py remove-db --alias pg_dev
+mcp-db remove-db --alias pg_dev
+```
+
+### Getting Help
+
+For detailed help and examples:
+
+```bash
+mcp-db --help
+mcp-db execute-query --help
 ```
 
 ## 4. Integration with Code Agents

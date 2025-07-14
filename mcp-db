@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# MCP Database CLI wrapper
+
+# Get the directory where this script is located (follow symlinks)
+SCRIPT_DIR="$( cd "$( dirname "$(readlink -f "${BASH_SOURCE[0]}")" )" &> /dev/null && pwd )"
+
+# Execute the Python script with the virtual environment
+"$SCRIPT_DIR/venv/bin/python" "$SCRIPT_DIR/main.py" "$@"

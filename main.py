@@ -5,16 +5,36 @@ import mysql.connector
 import oracledb
 import argparse
 from pymongo import MongoClient
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from mcp.server.fastmcp import FastMCP
 import config_db
-from bson import json_util
+from bson import json_util, ObjectId
 
 # Initialize the MCP server and the configuration database
 mcp = FastMCP()
 config_db.init_db()
 
 # --- Helper Functions ---
+
+def _convert_objectid_strings(obj):
+    """Convert ObjectId strings to ObjectId objects recursively"""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, dict) and "$oid" in value:
+                try:
+                    obj[key] = ObjectId(value["$oid"])
+                except:
+                    pass
+            elif isinstance(value, str) and len(value) == 24:
+                try:
+                    obj[key] = ObjectId(value)
+                except:
+                    pass
+            elif isinstance(value, dict):
+                obj[key] = _convert_objectid_strings(value)
+            elif isinstance(value, list):
+                obj[key] = [_convert_objectid_strings(item) if isinstance(item, dict) else item for item in value]
+    return obj
 
 def _build_and_validate_params(
     db_type: str,
@@ -120,7 +140,7 @@ def list_collections(
 @mcp.tool()
 def execute_query(
     database_alias: str,
-    query: str,
+    query: Union[str, Dict[str, Any]],
     params: Optional[Dict[str, Any]] = None,
     collection: Optional[str] = None,
     oracle_schema: Optional[str] = None
@@ -164,9 +184,23 @@ def execute_query(
             if not collection:
                 raise ValueError("MongoDB query requires a 'collection' to be specified.")
             
-            collection = db[collection]
-            filter_query = json.loads(query)
-            documents = json.loads(json_util.dumps(list(collection.find(filter_query))))
+            mongo_collection = db[collection]
+            
+            # Ensure we have a dict for the query
+            if isinstance(query, str):
+                try:
+                    query_dict = json.loads(query)
+                except:
+                    query_dict = query
+            else:
+                query_dict = query
+            
+            # Prevent empty queries to avoid large results
+            if not query_dict or query_dict == {}:
+                return {"data": [], "row_count": 0, "error": "Empty queries not allowed to prevent large results"}
+            
+            filter_query = _convert_objectid_strings(query_dict.copy() if isinstance(query_dict, dict) else {})
+            documents = json.loads(json_util.dumps(list(mongo_collection.find(filter_query).limit(10))))
             client.close()
             return {"data": documents, "row_count": len(documents)}
 
@@ -193,7 +227,42 @@ def execute_query(
 # --- Command-Line Interface (CLI) for Config Management ---
 
 def main_cli():
-    parser = argparse.ArgumentParser(description="MCP Database Server & Config CLI")
+    parser = argparse.ArgumentParser(
+        description="MCP Database Server & Config CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+EXAMPLES:
+  # List all configured database aliases
+  %(prog)s list-aliases
+  
+  # Add a PostgreSQL database
+  %(prog)s add-db --alias mydb --type postgres --host localhost --port 5432 --user postgres --password secret --dbname myapp
+  
+  # Add a MongoDB database
+  %(prog)s add-db --alias mymongo --type mongo --uri mongodb://localhost:27017 --dbname myapp
+  
+  # Execute a SQL query
+  %(prog)s execute-query --database_alias mydb --query "SELECT * FROM users LIMIT 5"
+  
+  # Execute a MongoDB query (automatically converts ObjectId strings)
+  %(prog)s execute-query --database_alias mymongo --query '{"campaign": "6850982849bcd9c1f6633874"}' --collection optins
+  
+  # Execute a parameterized query
+  %(prog)s execute-query --database_alias mydb --query "SELECT * FROM users WHERE id = :user_id" --params '{"user_id": 123}'
+  
+  # List MongoDB collections
+  %(prog)s list-collections --database_alias mymongo
+  
+  # Remove a database connection
+  %(prog)s remove-db --alias mydb
+
+NOTES:
+  - MongoDB queries automatically convert 24-character strings to ObjectId objects
+  - All queries are limited to 10 results by default to prevent large outputs
+  - Database credentials are stored encrypted in mcp_config.sqlite3
+  - Use single quotes around JSON parameters to avoid shell interpretation
+        """
+    )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # 'run' command
@@ -218,12 +287,13 @@ def main_cli():
     parser_remove.add_argument("--alias", required=True, help="Alias of the connection to remove")
 
     # 'execute-query' command
-    parser_execute = subparsers.add_parser("execute-query", help="Execute a query on a configured database")
+    parser_execute = subparsers.add_parser("execute-query", help="Execute a query on a configured database", 
+                                          description="Execute SQL or MongoDB queries. Results are limited to 10 rows by default.")
     parser_execute.add_argument("--database_alias", required=True, help="Alias of the database to connect to")
-    parser_execute.add_argument("--query", required=True, help="The query to execute")
-    parser_execute.add_argument("--params", help="JSON string of parameters for the query")
-    parser_execute.add_argument("--collection", help="Collection name for MongoDB queries")
-    parser_execute.add_argument("--oracle_schema", help="Oracle schema to use")
+    parser_execute.add_argument("--query", required=True, help="SQL query or MongoDB query (JSON format)")
+    parser_execute.add_argument("--params", help="JSON string of parameters for SQL queries (e.g., '{\"user_id\": 123}')")
+    parser_execute.add_argument("--collection", help="Collection name for MongoDB queries (required for MongoDB)")
+    parser_execute.add_argument("--oracle_schema", help="Oracle schema to use (optional)")
 
     # 'list-collections' command
     parser_list_collections = subparsers.add_parser("list-collections", help="List collections for a MongoDB database")
