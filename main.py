@@ -8,6 +8,7 @@ from pymongo import MongoClient
 from typing import Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP
 import config_db
+from bson import json_util
 
 # Initialize the MCP server and the configuration database
 mcp = FastMCP()
@@ -97,7 +98,8 @@ def execute_query(
     database_alias: str,
     query: str,
     params: Optional[Dict[str, Any]] = None,
-    schema: Optional[str] = None
+    collection: Optional[str] = None,
+    oracle_schema: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Executes a query on a configured database and returns the result.
@@ -135,23 +137,20 @@ def execute_query(
         elif db_type == "mongo":
             client = MongoClient(db_info["uri"])
             db = client[db_info["dbname"]]
-            if not params or "collection" not in params:
-                raise ValueError("MongoDB query requires 'collection' in params.")
+            if not collection:
+                raise ValueError("MongoDB query requires a 'collection' to be specified.")
             
-            collection = db[params["collection"]]
+            collection = db[collection]
             filter_query = json.loads(query)
-            documents = list(collection.find(filter_query))
-            for doc in documents:
-                if "_id" in doc:
-                    doc["_id"] = str(doc["_id"])
+            documents = json.loads(json_util.dumps(list(collection.find(filter_query))))
             client.close()
             return {"data": documents, "row_count": len(documents)}
 
         elif db_type == "oracle":
             with oracledb.connect(**db_info["conn_params"]) as conn:
                 with conn.cursor() as cursor:
-                    if schema:
-                        cursor.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {schema}")
+                    if oracle_schema:
+                        cursor.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {oracle_schema}")
                     cursor.execute(query, params or {})
                     if cursor.description:
                         cursor.rowfactory = lambda *args: dict(zip([d[0].lower() for d in cursor.description], args))
@@ -176,6 +175,9 @@ def main_cli():
     # 'run' command
     subparsers.add_parser("run", help="Run the MCP server")
 
+    # 'list-aliases' command
+    subparsers.add_parser("list-aliases", help="List all configured database aliases")
+
     # 'add-db' command
     parser_add = subparsers.add_parser("add-db", help="Add a new database connection")
     parser_add.add_argument("--alias", required=True, help="Unique alias for the connection")
@@ -190,6 +192,14 @@ def main_cli():
     # 'remove-db' command
     parser_remove = subparsers.add_parser("remove-db", help="Remove a database connection")
     parser_remove.add_argument("--alias", required=True, help="Alias of the connection to remove")
+
+    # 'execute-query' command
+    parser_execute = subparsers.add_parser("execute-query", help="Execute a query on a configured database")
+    parser_execute.add_argument("--database_alias", required=True, help="Alias of the database to connect to")
+    parser_execute.add_argument("--query", required=True, help="The query to execute")
+    parser_execute.add_argument("--params", help="JSON string of parameters for the query")
+    parser_execute.add_argument("--oracle_schema", help="Oracle schema to use")
+
 
     args = parser.parse_args()
 
@@ -209,6 +219,23 @@ def main_cli():
             print(f"Database connection '{args.alias}' removed successfully.")
         else:
             print(f"Error: Database alias '{args.alias}' not found.")
+
+    elif args.command == "list-aliases":
+        aliases = list_aliases()
+        if aliases and aliases["aliases"]:
+            print("Configured database aliases:")
+            for alias_info in aliases["aliases"]:
+                print(f"  - Alias: {alias_info['alias']}, Type: {alias_info['type']}")
+        else:
+            print("No database aliases configured.")
+
+    elif args.command == "execute-query":
+        try:
+            params = json.loads(args.params) if args.params else None
+            result = execute_query(args.database_alias, args.query, params, args.oracle_schema)
+            print(json.dumps(result, indent=2))
+        except (ValueError, RuntimeError) as e:
+            print(f"Error: {e}")
     
     elif args.command == "run" or args.command is None:
         mcp.run()
