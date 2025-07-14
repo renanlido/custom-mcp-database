@@ -94,6 +94,30 @@ def remove_database(alias: str) -> Dict[str, str]:
         raise ValueError(f"Database alias '{alias}' not found.")
 
 @mcp.tool()
+def list_collections(
+    database_alias: str
+) -> Dict[str, Any]:
+    """
+    Lists all collections for a given MongoDB database alias.
+    """
+    db_info = config_db.get_connection(database_alias)
+
+    if not db_info:
+        raise ValueError(f"Database alias '{database_alias}' not found in configuration.")
+
+    if db_info.get("type") != "mongo":
+        raise ValueError(f"Alias '{database_alias}' is not a MongoDB database.")
+
+    try:
+        client = MongoClient(db_info["uri"])
+        db = client[db_info["dbname"]]
+        collections = db.list_collection_names()
+        client.close()
+        return {"collections": collections}
+    except Exception as e:
+        raise RuntimeError(f"Failed to list collections for '{database_alias}': {str(e)}") from e
+
+@mcp.tool()
 def execute_query(
     database_alias: str,
     query: str,
@@ -198,8 +222,12 @@ def main_cli():
     parser_execute.add_argument("--database_alias", required=True, help="Alias of the database to connect to")
     parser_execute.add_argument("--query", required=True, help="The query to execute")
     parser_execute.add_argument("--params", help="JSON string of parameters for the query")
+    parser_execute.add_argument("--collection", help="Collection name for MongoDB queries")
     parser_execute.add_argument("--oracle_schema", help="Oracle schema to use")
 
+    # 'list-collections' command
+    parser_list_collections = subparsers.add_parser("list-collections", help="List collections for a MongoDB database")
+    parser_list_collections.add_argument("--database_alias", required=True, help="Alias of the MongoDB database")
 
     args = parser.parse_args()
 
@@ -232,11 +260,18 @@ def main_cli():
     elif args.command == "execute-query":
         try:
             params = json.loads(args.params) if args.params else None
-            result = execute_query(args.database_alias, args.query, params, args.oracle_schema)
+            result = execute_query(args.database_alias, args.query, params, args.collection, args.oracle_schema)
             print(json.dumps(result, indent=2))
         except (ValueError, RuntimeError) as e:
             print(f"Error: {e}")
     
+    elif args.command == "list-collections":
+        try:
+            collections = list_collections(args.database_alias)
+            print(json.dumps(collections, indent=2))
+        except (ValueError, RuntimeError) as e:
+            print(f"Error: {e}")
+
     elif args.command == "run" or args.command is None:
         mcp.run()
 
