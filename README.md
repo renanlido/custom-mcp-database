@@ -1,5 +1,8 @@
 # Custom MCP Database
 
+<!-- MCP Registry ownership proof — required to publish to registry.modelcontextprotocol.io -->
+mcp-name: io.github.renanlido/custom-mcp-database
+
 An [MCP](https://modelcontextprotocol.io) server that lets AI agents run **alias-based**
 queries against **PostgreSQL, MySQL, MongoDB and Oracle** — without ever exposing
 credentials to the model. Connections are configured once and stored locally; the

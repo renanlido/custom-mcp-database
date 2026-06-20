@@ -68,6 +68,7 @@ These require reading `core.py` + `config_db.py` together and are the main sourc
 - Registry id is reverse-DNS `io.github.renanlido/custom-mcp-database`.
 - **Version has a single source: `pyproject.toml` `[project].version`.** `scripts/sync_version.py` propagates it into `server.json`, `manifest.json`, `.claude-plugin/plugin.json`, `marketplace.json`. Never hand-edit those version fields; run `make version-sync` (or let CI do it). Add new version-bearing files to `JSON_TARGETS` in that script.
 - The universal client launch command is `uvx custom-mcp-database run` (stdio).
+- `README.md` MUST keep the line `mcp-name: io.github.renanlido/custom-mcp-database`. The MCP Registry validates PyPI package ownership by requiring that marker in the published README; removing it makes `mcp-publisher publish` fail with HTTP 400.
 
 ## Release automation
 
