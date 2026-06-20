@@ -95,12 +95,39 @@ Config location (override with `MCP_DB_CONFIG`):
 | `db_remove_database` | Remove a connection |
 | `db_execute_query` | Run SQL or a MongoDB JSON filter |
 | `db_list_collections` | List MongoDB collections |
+| `db_security_status` | Report the active security policy |
 
 `db_execute_query` notes: SQL runs as given with parameterized binds (add your own
 `LIMIT`); MongoDB takes a JSON filter + `collection`, caps results at 10 (`--limit`),
 rejects empty filters, and coerces 24-char hex strings to `ObjectId`.
 
 ---
+
+## Security
+
+This server handles **real credentials** and **production data**, so it ships
+**deny-by-default**:
+
+- **Read-only by default.** Only SELECT-class SQL runs. Writes/DDL require explicit opt-in.
+- **No stacked statements** (`;`-injection blocked), **single statement per call**.
+- **MongoDB server-side JavaScript blocked** (`$where`, `$function`, `$accumulator`, mapReduce, …).
+- **Identifiers validated** (`oracle_schema` can't be used for injection).
+- **Results capped** at `MCP_DB_MAX_ROWS` (default 1000); **secrets redacted** from errors.
+- **Credential store** is `0600` plaintext SQLite — keep the host disk encrypted.
+
+Check the live posture: `custom-mcp-database security-status` (or the `db_security_status` tool).
+
+Enable writes for a specific task (then turn it back off):
+
+```bash
+export MCP_DB_READONLY=0
+export MCP_DB_ALLOW_WRITES=1     # INSERT/UPDATE/DELETE
+# export MCP_DB_ALLOW_DDL=1      # only if you really need CREATE/DROP/ALTER/...
+```
+
+**Read the full protocol — least-privilege DB roles, TLS, prompt-injection handling,
+vulnerability reporting — in [SECURITY.md](SECURITY.md).** The app-layer guards are
+defense-in-depth; the authoritative control is a least-privilege database account.
 
 ## Develop
 

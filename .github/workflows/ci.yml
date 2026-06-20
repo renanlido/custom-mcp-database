@@ -16,6 +16,9 @@ jobs:
       - name: Lint
         run: uvx ruff check .
 
+      - name: Security + unit tests
+        run: uv run --with pytest python -m pytest tests/ -q
+
       - name: Build
         run: uv build
 

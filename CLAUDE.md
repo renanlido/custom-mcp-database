@@ -59,8 +59,10 @@ These require reading `core.py` + `config_db.py` together and are the main sourc
 
 ## Storage & Security
 
-- Connection params are stored as **plaintext JSON** in the SQLite config file ([config_db.py `add_connection`](src/custom_mcp_database/config_db.py)). It is gitignored and not encrypted — treat as a secret.
+- Connection params are stored as **plaintext JSON** in the SQLite config file ([config_db.py `add_connection`](src/custom_mcp_database/config_db.py)), chmod'd `0600`. Gitignored, not encrypted — treat as a secret.
 - SQL uses parameterized binds; oracle uses named binds (`:name`), defaults params to `{}`.
+- **Security policy engine: [security.py](src/custom_mcp_database/security.py).** Deny-by-default. `execute_query` calls `enforce_sql_policy` / `enforce_mongo_filter` / `validate_identifier` **before opening any connection** (so `SecurityError` surfaces un-wrapped, not as a DB error). Guards: read-only by default, single-statement only (no `;` stacking), writes need `MCP_DB_ALLOW_WRITES`, DDL needs `MCP_DB_ALLOW_DDL` (both gated by `MCP_DB_READONLY=0`), Mongo JS operators blocked, results capped at `MCP_DB_MAX_ROWS` (default 1000) with a `truncated` flag, driver errors passed through `security.redact` against `collect_secrets`. Posture via `db_security_status` tool / `security-status` CLI. Full protocol in [SECURITY.md](SECURITY.md).
+- When adding a query path or tool, route it through the `security.*` guards; never interpolate agent input into SQL/identifiers. Security guards are unit-tested in `tests/test_security.py` (pure, no DB) — keep them green.
 
 ## Distribution invariants
 

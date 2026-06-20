@@ -44,10 +44,11 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         run: uv run --no-project python scripts/sync_version.py
 
-      - name: Lint + build
+      - name: Lint + test + build
         if: steps.bump.outputs.bumped == 'true'
         run: |
           uvx ruff check .
+          uv run --with pytest python -m pytest tests/ -q
           uv build
 
       - name: Commit, tag and push

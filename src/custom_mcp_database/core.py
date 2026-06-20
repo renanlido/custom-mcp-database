@@ -14,7 +14,8 @@ import psycopg2.extras
 from bson import ObjectId, json_util
 from pymongo import MongoClient
 
-from . import config_db
+from . import config_db, security
+from .security import SecurityError
 
 DEFAULT_LIMIT = 10
 
@@ -123,7 +124,16 @@ def list_collections(database_alias: str) -> dict[str, Any]:
         client.close()
         return {"collections": collections}
     except Exception as e:
-        raise RuntimeError(f"Failed to list collections for '{database_alias}': {e}") from e
+        secrets = security.collect_secrets(db_info)
+        raise RuntimeError(
+            f"Failed to list collections for '{database_alias}': "
+            f"{security.redact(str(e), secrets)}"
+        ) from None
+
+
+def security_status() -> dict[str, Any]:
+    """Return the active security policy (read-only/writes/DDL/row cap)."""
+    return security.policy()
 
 
 def execute_query(
@@ -136,15 +146,49 @@ def execute_query(
 ) -> dict[str, Any]:
     """Execute a query against a configured database and return rows + row_count.
 
-    SQL drivers (postgres/mysql/oracle) run the query as given with parameterized
-    binds. MongoDB takes a JSON filter, requires ``collection``, and is capped at
-    ``limit`` documents (default 10) with empty filters rejected.
+    Security: enforced BEFORE any connection is opened. SQL is parsed and must be a
+    single statement permitted by the active policy (read-only by default; writes/DDL
+    require explicit opt-in env vars). ``oracle_schema`` is validated as an identifier.
+    MongoDB filters that use server-side JavaScript are rejected. Results are capped at
+    ``min(limit, MCP_DB_MAX_ROWS)`` and a ``truncated`` flag is returned.
     """
     db_info = config_db.get_connection(database_alias)
     if not db_info:
         raise ValueError(f"Database alias '{database_alias}' not found in configuration.")
 
     db_type = db_info.get("type")
+    cap = min(int(limit), security.max_rows())
+    if cap < 1:
+        cap = 1
+    secrets = security.collect_secrets(db_info)
+
+    # --- Policy enforcement (outside the try: SecurityError must surface verbatim) ---
+    if db_type in ("postgres", "mysql", "oracle"):
+        if not isinstance(query, str):
+            raise SecurityError("SQL query must be a string.")
+        security.enforce_sql_policy(query)
+        if db_type == "oracle" and oracle_schema:
+            security.validate_identifier(oracle_schema, field="oracle_schema")
+    elif db_type == "mongo":
+        if isinstance(query, str):
+            try:
+                query_dict = json.loads(query)
+            except Exception as e:
+                raise ValueError(f"Invalid MongoDB filter JSON: {e}") from e
+        else:
+            query_dict = query
+        if not query_dict or query_dict == {}:
+            return {
+                "data": [],
+                "row_count": 0,
+                "error": "Empty queries not allowed to prevent large results",
+            }
+        security.enforce_mongo_filter(query_dict)
+
+    def _capped_fetch(cursor) -> tuple[list, bool]:
+        rows = cursor.fetchmany(cap)
+        truncated = cursor.fetchone() is not None
+        return rows, truncated
 
     try:
         if db_type == "postgres":
@@ -152,8 +196,8 @@ def execute_query(
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
                     cursor.execute(query, params)
                     if cursor.description:
-                        result = cursor.fetchall()
-                        return {"data": result, "row_count": len(result)}
+                        result, truncated = _capped_fetch(cursor)
+                        return {"data": result, "row_count": len(result), "truncated": truncated}
                     conn.commit()
                     return {"data": [], "row_count": cursor.rowcount}
 
@@ -162,8 +206,8 @@ def execute_query(
                 with conn.cursor(dictionary=True) as cursor:
                     cursor.execute(query, params)
                     if cursor.with_rows:
-                        result = cursor.fetchall()
-                        return {"data": result, "row_count": len(result)}
+                        result, truncated = _capped_fetch(cursor)
+                        return {"data": result, "row_count": len(result), "truncated": truncated}
                     conn.commit()
                     return {"data": [], "row_count": cursor.rowcount}
 
@@ -173,30 +217,15 @@ def execute_query(
             if not collection:
                 raise ValueError("MongoDB query requires a 'collection' to be specified.")
             mongo_collection = db[collection]
-
-            if isinstance(query, str):
-                try:
-                    query_dict = json.loads(query)
-                except Exception:
-                    query_dict = query
-            else:
-                query_dict = query
-
-            if not query_dict or query_dict == {}:
-                return {
-                    "data": [],
-                    "row_count": 0,
-                    "error": "Empty queries not allowed to prevent large results",
-                }
-
             filter_query = convert_objectid_strings(
                 query_dict.copy() if isinstance(query_dict, dict) else {}
             )
-            documents = json.loads(
-                json_util.dumps(list(mongo_collection.find(filter_query).limit(limit)))
-            )
+            cursor = mongo_collection.find(filter_query).limit(cap + 1)
+            docs = json.loads(json_util.dumps(list(cursor)))
             client.close()
-            return {"data": documents, "row_count": len(documents)}
+            truncated = len(docs) > cap
+            docs = docs[:cap]
+            return {"data": docs, "row_count": len(docs), "truncated": truncated}
 
         if db_type == "oracle":
             with oracledb.connect(**db_info["conn_params"]) as conn:
@@ -208,12 +237,16 @@ def execute_query(
                         cursor.rowfactory = lambda *args: dict(
                             zip([d[0].lower() for d in cursor.description], args, strict=False)
                         )
-                        result = cursor.fetchall()
-                        return {"data": result, "row_count": len(result)}
+                        result, truncated = _capped_fetch(cursor)
+                        return {"data": result, "row_count": len(result), "truncated": truncated}
                     conn.commit()
                     return {"data": [], "row_count": cursor.rowcount}
 
         raise ValueError(f"Unsupported database type: {db_type}")
 
+    except SecurityError:
+        raise
     except Exception as e:
-        raise RuntimeError(f"Query execution failed: {e}") from e
+        raise RuntimeError(
+            f"Query execution failed: {security.redact(str(e), secrets)}"
+        ) from None

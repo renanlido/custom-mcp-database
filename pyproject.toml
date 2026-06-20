@@ -19,6 +19,7 @@ dependencies = [
     "mysql-connector-python>=9.0",
     "pymongo>=4.6",
     "oracledb>=2.0",
+    "sqlparse>=0.5",
 ]
 
 [project.urls]
@@ -31,7 +32,7 @@ custom-mcp-database = "custom_mcp_database.cli:main"
 mcp-db = "custom_mcp_database.cli:main"
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "build>=1.2"]
+dev = ["ruff>=0.6", "build>=1.2", "pytest>=8.0"]
 
 [build-system]
 requires = ["hatchling"]

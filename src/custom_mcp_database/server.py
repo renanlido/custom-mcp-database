@@ -126,6 +126,26 @@ def db_execute_query(
     return core.execute_query(database_alias, query, params, collection, oracle_schema, limit)
 
 
+@mcp.tool(
+    name="db_security_status",
+    annotations={
+        "title": "Show security policy",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def db_security_status() -> dict[str, Any]:
+    """Report the active security policy.
+
+    Returns:
+        {"readonly": bool, "allow_writes": bool, "allow_ddl": bool,
+         "max_rows": int, "mongo_javascript_blocked": bool}
+    """
+    return core.security_status()
+
+
 def run() -> None:
     """Start the MCP server over stdio."""
     mcp.run()

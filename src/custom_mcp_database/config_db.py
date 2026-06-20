@@ -21,8 +21,16 @@ def _resolve_db_file() -> str:
 DB_FILE = _resolve_db_file()
 
 
+def _harden_permissions() -> None:
+    """Restrict the config file to the owner (0600). The file holds DB credentials."""
+    try:
+        os.chmod(DB_FILE, 0o600)
+    except OSError:
+        pass  # best-effort (e.g. unsupported filesystem / Windows ACLs)
+
+
 def init_db() -> None:
-    """Create the connections table if it doesn't exist."""
+    """Create the connections table if it doesn't exist, with owner-only permissions."""
     with sqlite3.connect(DB_FILE) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -35,6 +43,7 @@ def init_db() -> None:
             """
         )
         conn.commit()
+    _harden_permissions()
 
 
 def add_connection(alias: str, db_type: str, params: dict[str, Any]) -> None:

@@ -82,6 +82,8 @@ NOTES:
     p_lc = sub.add_parser("list-collections", help="List collections for a MongoDB database")
     p_lc.add_argument("--database_alias", required=True, help="Alias of the MongoDB database")
 
+    sub.add_parser("security-status", help="Show the active security policy")
+
     return parser
 
 
@@ -131,6 +133,9 @@ def main() -> None:
             print(json.dumps(core.list_collections(args.database_alias), indent=2))
         except (ValueError, RuntimeError) as e:
             print(f"Error: {e}")
+
+    elif args.command == "security-status":
+        print(json.dumps(core.security_status(), indent=2))
 
     else:  # "run" or no command
         from .server import run as run_server
