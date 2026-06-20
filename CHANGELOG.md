@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.2] - 2026-06-20
+
+### Other
+- add security CI (CodeQL, Dependabot, pip-audit, gitleaks) and fix CI smoke tool surface
+
 ## [0.6.1] - 2026-06-20
 
 ### Fixes
