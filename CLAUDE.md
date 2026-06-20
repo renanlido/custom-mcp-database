@@ -32,6 +32,7 @@ make build              # uv build -> dist/  (sdist + wheel)
 uv run mcp dev src/custom_mcp_database/server.py   # MCP Inspector
 
 # CLI (also: python -m custom_mcp_database, or uvx custom-mcp-database)
+uv run custom-mcp-database setup            # interactive guided wizard (cli._run_setup)
 uv run custom-mcp-database add-db --alias <name> --type <postgres|mysql|mongo|oracle> [conn flags]
 uv run custom-mcp-database execute-query --database_alias <alias> --query <q> [--params <json>] [--collection <c>] [--limit N]
 ```

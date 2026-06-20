@@ -6,6 +6,95 @@ import json
 
 from . import config_db, core
 
+_DEFAULT_PORTS = {"postgres": 5432, "mysql": 3306, "oracle": 1521}
+
+
+def _ask(label: str, default: str | None = None, required: bool = True) -> str:
+    suffix = f" [{default}]" if default is not None else ""
+    while True:
+        val = input(f"{label}{suffix}: ").strip()
+        if not val and default is not None:
+            return default
+        if val or not required:
+            return val
+        print("  (required)")
+
+
+def _ask_choice(label: str, choices: list[str]) -> str:
+    print(label)
+    for i, c in enumerate(choices, 1):
+        print(f"  {i}) {c}")
+    while True:
+        raw = input("> ").strip()
+        if raw.isdigit() and 1 <= int(raw) <= len(choices):
+            return choices[int(raw) - 1]
+        print("  (enter a number)")
+
+
+def _ask_secret(label: str) -> tuple[str, str]:
+    """Return (kind, value): kind in {'now','env','file'}. Secret never echoed."""
+    choice = _ask_choice(
+        f"How should the {label} be provided?",
+        ["Enter it now (hidden input)", "Read from an environment variable", "Read from a file"],
+    )
+    if choice.startswith("Enter"):
+        return "now", getpass.getpass(f"  {label} (hidden): ")
+    if "environment" in choice:
+        return "env", _ask(f"  Name of the env var holding the {label}")
+    return "file", _ask(f"  Path of the file holding the {label}")
+
+
+def _run_setup() -> None:
+    """Interactive, secret-safe wizard to add a connection."""
+    print("Add a database connection. Press Ctrl-C to abort.\n")
+    try:
+        alias = _ask("Alias (a short name you'll reference, e.g. 'prod_ro')")
+        db_type = _ask_choice("Database type:", ["postgres", "mysql", "oracle", "mongo"])
+        kwargs: dict = {}
+        if db_type == "mongo":
+            kwargs["dbname"] = _ask("Database name")
+            kind, val = _ask_secret("MongoDB connection URI")
+            kwargs[{"now": "uri", "env": "uri_env", "file": "uri_file"}[kind]] = val
+        else:
+            kwargs["host"] = _ask("Host", default="localhost")
+            kwargs["port"] = int(_ask("Port", default=str(_DEFAULT_PORTS[db_type])))
+            kwargs["user"] = _ask("User")
+            kwargs["dbname"] = _ask("Database name")
+            kind, val = _ask_secret("password")
+            kwargs[{"now": "password", "env": "password_env", "file": "password_file"}[kind]] = val
+    except (KeyboardInterrupt, EOFError):
+        print("\nAborted. Nothing was saved.")
+        return
+
+    shown = {k: v for k, v in kwargs.items() if k not in ("password", "uri")}
+    if "password" in kwargs:
+        shown["password"] = "<hidden>"
+    if "uri" in kwargs:
+        shown["uri"] = "<hidden>"
+    print(f"\nSummary:\n  alias: {alias}\n  type:  {db_type}")
+    for k, v in shown.items():
+        print(f"  {k}: {v}")
+
+    if _ask("Save this connection? (y/n)", default="y").lower() not in ("y", "yes"):
+        print("Not saved.")
+        return
+    try:
+        print(core.add_database(alias, db_type, **kwargs)["status"])
+    except ValueError as e:
+        print(f"Error: {e}")
+        return
+
+    if _ask("Test the connection now? (y/n)", default="y").lower() in ("y", "yes"):
+        try:
+            if db_type == "mongo":
+                core.list_collections(alias)
+            else:
+                core.execute_query(alias, "SELECT 1 FROM DUAL" if db_type == "oracle" else "SELECT 1")
+            print("Connection OK.")
+        except Exception as e:  # noqa: BLE001 - surface any driver/policy error to the user
+            print(f"Connection test failed: {e}")
+            print("The connection was saved; fix the details with 'add-db' or re-run 'setup'.")
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -49,6 +138,7 @@ NOTES:
     sub = parser.add_subparsers(dest="command", help="Available commands")
 
     sub.add_parser("run", help="Run the MCP server (stdio)")
+    sub.add_parser("setup", help="Interactive, guided wizard to add a connection (secret-safe)")
     sub.add_parser("list-aliases", help="List all configured database aliases")
 
     p_add = sub.add_parser("add-db", help="Add a new database connection")
@@ -101,7 +191,10 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if args.command == "add-db":
+    if args.command == "setup":
+        _run_setup()
+
+    elif args.command == "add-db":
         password = args.password
         uri = args.uri
         # Prompt securely when no secret (literal or reference) was supplied.

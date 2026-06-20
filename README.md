@@ -23,13 +23,20 @@ password from ever reaching the model.
 The **agent never installs credentials.** You do, with the CLI. The secret stays on
 your machine and is never sent to the model.
 
+Easiest way — the **guided wizard** (asks type, host, user, and how to supply the
+secret; optionally tests the connection):
+
 ```bash
-# 1. add a connection (you'll be prompted for the password — hidden input)
+uvx custom-mcp-database setup
+```
+
+Or do it in one line (you'll be prompted for the password — hidden input):
+
+```bash
 uvx custom-mcp-database add-db --alias prod_ro --type postgres \
   --host db.internal --port 5432 --user reporting --dbname app
 
-# 2. confirm it's there
-uvx custom-mcp-database list-aliases
+uvx custom-mcp-database list-aliases   # confirm it's there
 ```
 
 ### The agent (always) — uses it by alias
