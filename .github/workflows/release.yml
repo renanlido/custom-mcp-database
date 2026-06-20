@@ -44,6 +44,10 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         run: uv run --no-project python scripts/sync_version.py
 
+      - name: Generate changelog
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv run --no-project python scripts/gen_changelog.py "${{ steps.bump.outputs.version }}"
+
       - name: Lint + test + build
         if: steps.bump.outputs.bumped == 'true'
         run: |
@@ -55,7 +59,7 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         run: |
           V="${{ steps.bump.outputs.version }}"
-          git add pyproject.toml server.json manifest.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git add pyproject.toml server.json manifest.json .claude-plugin/plugin.json .claude-plugin/marketplace.json CHANGELOG.md
           git commit -m "chore(release): v${V} [skip ci]"
           git tag "v${V}"
           git push origin HEAD:main
@@ -74,7 +78,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.bump.outputs.version }}"
-          generate_release_notes: true
+          body_path: .release_notes.md
           files: |
             dist/*
             custom-mcp-database-${{ steps.bump.outputs.version }}.mcpb

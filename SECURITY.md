@@ -30,6 +30,9 @@ produces, nor the data returned by the databases.
 | Result cap | Every result limited to `MCP_DB_MAX_ROWS` (default 1000); `truncated` flag returned | `core.execute_query` |
 | Error redaction | Known secrets (password, DSN, URI) stripped from error messages | `security.redact` |
 | Credential file perms | Config SQLite chmod'd to `0600` | `config_db._harden_permissions` |
+| No credential intake via agent | Add/remove tools are off the MCP surface by default; provisioning is CLI/human-only | `security.admin_tools_enabled` |
+| Secret-by-reference | Passwords/URIs can be stored as an env-var name or file path, resolved at connect time — plaintext never persisted | `core.resolve_secrets` |
+| Secure CLI prompt | `add-db` prompts with hidden input when no secret/reference is given | `cli` (getpass) |
 | Parameterized binds | Values passed via driver placeholders, never string-formatted | `core.execute_query` |
 
 Check the live posture any time: `custom-mcp-database security-status` or the
@@ -43,7 +46,26 @@ Check the live posture any time: `custom-mcp-database security-status` or the
 | `MCP_DB_ALLOW_WRITES` | `0` | With `MCP_DB_READONLY=0`, permits INSERT/UPDATE/DELETE/MERGE. |
 | `MCP_DB_ALLOW_DDL` | `0` | With `MCP_DB_READONLY=0`, permits CREATE/DROP/ALTER/TRUNCATE/GRANT and procedure execution. |
 | `MCP_DB_MAX_ROWS` | `1000` | Hard cap on rows/documents returned per call. |
+| `MCP_DB_ALLOW_ADMIN_TOOLS` | `0` | `1` re-exposes `db_add_database`/`db_remove_database` over MCP. Leave `0`. |
 | `MCP_DB_CONFIG` | — | Path to the credential SQLite file (else `~/.config/custom-mcp-database/`). |
+
+## Credential intake — never through the agent
+
+An MCP tool's arguments are produced and read by the LLM. A password passed as a tool
+argument therefore lands in the model's context, the model provider, and any transcript
+or log — "se vaza pro agente, vaza geral". To prevent this:
+
+- The credential-management tools (`db_add_database`/`db_remove_database`) are **not
+  exposed over MCP by default**. Connections are provisioned out-of-band with the
+  `custom-mcp-database` CLI, run by a human in their terminal.
+- Provide secrets **by reference**: `--password-env NAME` / `--password-file PATH`
+  (and `--uri-env` / `--uri-file` for MongoDB). Only the reference is stored; the value
+  is resolved from the environment or file at connection time.
+- Omit `--password`/`--uri` to be **prompted with hidden input** (kept out of shell
+  history and the process list).
+- If you set `MCP_DB_ALLOW_ADMIN_TOOLS=1`, the exposed add tool still accepts secrets
+  **only by reference** — never a literal password — but you reintroduce the agent into
+  the provisioning path. Prefer leaving it off.
 
 Writes against production require a **deliberate** `MCP_DB_READONLY=0` +
 `MCP_DB_ALLOW_WRITES=1`. Keep DDL off unless you truly need it.

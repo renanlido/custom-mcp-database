@@ -136,3 +136,6 @@ mcp_config.sqlite3-wal
 # MCP bundles
 *.mcpb
 *.dxt
+
+# release notes scratch
+.release_notes.md

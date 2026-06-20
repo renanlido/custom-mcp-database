@@ -83,7 +83,8 @@ def get_connection(alias: str) -> dict[str, Any] | None:
         db_type, params_json = row
         params = json.loads(params_json)
         if db_type == "mongo":
-            return {"type": db_type, "uri": params.get("uri"), "dbname": params.get("dbname")}
+            # Spread all stored params (uri OR uri_env/uri_file refs, dbname).
+            return {"type": db_type, **params}
         return {"type": db_type, "conn_params": params}
 
 
@@ -96,11 +97,7 @@ def get_all_connections() -> dict[str, Any]:
         for alias, db_type, params_json in cursor.fetchall():
             params = json.loads(params_json)
             if db_type == "mongo":
-                configs[alias] = {
-                    "type": db_type,
-                    "uri": params.get("uri"),
-                    "dbname": params.get("dbname"),
-                }
+                configs[alias] = {"type": db_type, **params}
             else:
                 configs[alias] = {"type": db_type, "conn_params": params}
     return configs

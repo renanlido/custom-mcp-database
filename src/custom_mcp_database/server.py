@@ -4,7 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from . import config_db, core
+from . import config_db, core, security
 
 mcp = FastMCP("database_mcp")
 config_db.init_db()
@@ -29,48 +29,62 @@ def db_list_aliases() -> dict[str, Any]:
     return core.list_aliases()
 
 
-@mcp.tool(
-    name="db_add_database",
-    annotations={
-        "title": "Add database connection",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
-)
-def db_add_database(
+# Credential-management tools are NOT exposed over MCP by default. A tool's arguments
+# are produced and read by the LLM, so accepting a password through a tool would leak it
+# into the model context (and the provider/transcripts/logs). Provision connections
+# out-of-band with the `custom-mcp-database` CLI instead. Set MCP_DB_ALLOW_ADMIN_TOOLS=1
+# to re-expose these over MCP (accepting that leak).
+def _db_add_database(
     alias: str,
     db_type: str,
     host: str | None = None,
     port: int | None = None,
     user: str | None = None,
-    password: str | None = None,
     dbname: str | None = None,
-    uri: str | None = None,
+    password_env: str | None = None,
+    password_file: str | None = None,
+    uri_env: str | None = None,
+    uri_file: str | None = None,
 ) -> dict[str, str]:
-    """Add (or replace) a database connection in the local config.
+    """Add (or replace) a database connection by *reference* (no plaintext secrets).
 
-    SQL types (postgres, mysql, oracle) require: host, port, user, password, dbname.
-    MongoDB requires: uri, dbname. Credentials are stored locally; the agent never
-    needs to see them again — it references the connection by ``alias``.
+    Pass secrets by reference only: ``password_env``/``password_file`` for SQL,
+    ``uri_env``/``uri_file`` for MongoDB. The actual secret is resolved from the named
+    environment variable or file at connection time and is never sent through the agent.
     """
-    return core.add_database(alias, db_type, host, port, user, password, dbname, uri)
+    return core.add_database(
+        alias, db_type, host, port, user, dbname=dbname,
+        password_env=password_env, password_file=password_file,
+        uri_env=uri_env, uri_file=uri_file,
+    )
 
 
-@mcp.tool(
-    name="db_remove_database",
-    annotations={
-        "title": "Remove database connection",
-        "readOnlyHint": False,
-        "destructiveHint": True,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
-)
-def db_remove_database(alias: str) -> dict[str, str]:
+def _db_remove_database(alias: str) -> dict[str, str]:
     """Remove a configured database connection by alias."""
     return core.remove_database(alias)
+
+
+if security.admin_tools_enabled():
+    mcp.tool(
+        name="db_add_database",
+        annotations={
+            "title": "Add database connection (by reference)",
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )(_db_add_database)
+    mcp.tool(
+        name="db_remove_database",
+        annotations={
+            "title": "Remove database connection",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )(_db_remove_database)
 
 
 @mcp.tool(

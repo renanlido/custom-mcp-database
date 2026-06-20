@@ -53,6 +53,18 @@ def _flag(name: str, default: str = "0") -> bool:
     return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
+def admin_tools_enabled() -> bool:
+    """Whether credential-management tools are exposed over MCP.
+
+    OFF by default: an MCP tool's arguments are produced and read by the LLM, so
+    accepting a password through a tool would leak it into the model context (and the
+    provider, transcripts, and logs). Connections are provisioned out-of-band via the
+    CLI instead. Enabling this re-exposes add/remove over MCP and reintroduces that
+    leak — only for callers who explicitly accept the tradeoff.
+    """
+    return _flag("MCP_DB_ALLOW_ADMIN_TOOLS", "0")
+
+
 def policy() -> dict[str, Any]:
     """Snapshot of the active policy (also exposed as a status tool)."""
     readonly = _flag("MCP_DB_READONLY", "1")

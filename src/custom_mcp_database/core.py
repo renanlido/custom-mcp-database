@@ -5,6 +5,8 @@ and unit-tested. Query execution behavior matches the original implementation.
 """
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 import mysql.connector
@@ -48,6 +50,29 @@ def convert_objectid_strings(obj: Any) -> Any:
     return obj
 
 
+def _secret_ref(
+    label: str,
+    literal: str | None,
+    env: str | None,
+    file: str | None,
+) -> dict[str, str]:
+    """Return a single stored secret reference: literal value, env-var name, or file path.
+
+    Storing a reference (``*_env`` / ``*_file``) means the plaintext secret never lives
+    in the config DB — it is resolved at connection time.
+    """
+    provided = [x for x in (literal, env, file) if x]
+    if len(provided) > 1:
+        raise ValueError(f"Provide only one of '{label}', '{label}_env', or '{label}_file'.")
+    if literal:
+        return {label: literal}
+    if env:
+        return {f"{label}_env": env}
+    if file:
+        return {f"{label}_file": file}
+    return {}
+
+
 def build_and_validate_params(
     db_type: str,
     host: str | None = None,
@@ -56,19 +81,32 @@ def build_and_validate_params(
     password: str | None = None,
     dbname: str | None = None,
     uri: str | None = None,
+    password_env: str | None = None,
+    password_file: str | None = None,
+    uri_env: str | None = None,
+    uri_file: str | None = None,
 ) -> dict[str, Any]:
-    """Validate inputs and build the driver-specific params dict for storage."""
+    """Validate inputs and build the driver-specific params dict for storage.
+
+    Secrets may be given literally or by reference (``*_env`` / ``*_file``); references
+    are stored instead of the value and resolved at connection time.
+    """
     if db_type == "mongo":
-        if not uri or not dbname:
-            raise ValueError("For MongoDB, 'uri' and 'dbname' are required.")
-        return {"uri": uri, "dbname": dbname}
+        uri_ref = _secret_ref("uri", uri, uri_env, uri_file)
+        if not uri_ref or not dbname:
+            raise ValueError(
+                "For MongoDB, 'dbname' and one of 'uri'/'uri_env'/'uri_file' are required."
+            )
+        return {"dbname": dbname, **uri_ref}
 
     if db_type in ("postgres", "mysql", "oracle"):
-        if not all([host, port, user, password, dbname]):
+        pw_ref = _secret_ref("password", password, password_env, password_file)
+        if not all([host, port, user, dbname]) or not pw_ref:
             raise ValueError(
-                f"For {db_type}, 'host', 'port', 'user', 'password', and 'dbname' are required."
+                f"For {db_type}, 'host', 'port', 'user', 'dbname', and one of "
+                "'password'/'password_env'/'password_file' are required."
             )
-        params: dict[str, Any] = {"host": host, "port": port, "user": user, "password": password}
+        params: dict[str, Any] = {"host": host, "port": port, "user": user, **pw_ref}
         if db_type == "mysql":
             params["database"] = dbname
         else:
@@ -78,6 +116,40 @@ def build_and_validate_params(
         return params
 
     raise ValueError(f"Unsupported database type: {db_type}")
+
+
+def _resolve_ref(d: dict[str, Any], label: str) -> None:
+    """In-place: turn ``label_env``/``label_file`` in ``d`` into a concrete ``label`` value."""
+    if d.get(label):
+        return
+    env = d.pop(f"{label}_env", None)
+    file = d.pop(f"{label}_file", None)
+    if env is not None:
+        val = os.environ.get(env)
+        if val is None or val == "":
+            raise RuntimeError(f"Environment variable '{env}' (for {label}) is not set.")
+        d[label] = val
+    elif file is not None:
+        try:
+            d[label] = Path(file).expanduser().read_text(encoding="utf-8").strip()
+        except OSError as e:
+            raise RuntimeError(f"Could not read {label} file '{file}': {e}") from None
+
+
+def resolve_secrets(db_info: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of a stored connection with secret references resolved to values.
+
+    Resolution happens here, at connection time, so the plaintext secret is never
+    persisted and never returned by any listing/tool.
+    """
+    resolved = dict(db_info)
+    if resolved.get("type") == "mongo":
+        _resolve_ref(resolved, "uri")
+    else:
+        conn = dict(resolved.get("conn_params") or {})
+        _resolve_ref(conn, "password")
+        resolved["conn_params"] = conn
+    return resolved
 
 
 def list_aliases() -> dict[str, Any]:
@@ -96,9 +168,17 @@ def add_database(
     password: str | None = None,
     dbname: str | None = None,
     uri: str | None = None,
+    password_env: str | None = None,
+    password_file: str | None = None,
+    uri_env: str | None = None,
+    uri_file: str | None = None,
 ) -> dict[str, str]:
     """Persist a new (or replace an existing) database connection."""
-    params = build_and_validate_params(db_type, host, port, user, password, dbname, uri)
+    params = build_and_validate_params(
+        db_type, host, port, user, password, dbname, uri,
+        password_env=password_env, password_file=password_file,
+        uri_env=uri_env, uri_file=uri_file,
+    )
     config_db.add_connection(alias, db_type, params)
     return {"status": f"Database '{alias}' added successfully."}
 
@@ -112,11 +192,12 @@ def remove_database(alias: str) -> dict[str, str]:
 
 def list_collections(database_alias: str) -> dict[str, Any]:
     """List all collections for a configured MongoDB alias."""
-    db_info = config_db.get_connection(database_alias)
-    if not db_info:
+    stored = config_db.get_connection(database_alias)
+    if not stored:
         raise ValueError(f"Database alias '{database_alias}' not found in configuration.")
-    if db_info.get("type") != "mongo":
+    if stored.get("type") != "mongo":
         raise ValueError(f"Alias '{database_alias}' is not a MongoDB database.")
+    db_info = resolve_secrets(stored)
     try:
         client = MongoClient(db_info["uri"])
         db = client[db_info["dbname"]]
@@ -152,11 +233,12 @@ def execute_query(
     MongoDB filters that use server-side JavaScript are rejected. Results are capped at
     ``min(limit, MCP_DB_MAX_ROWS)`` and a ``truncated`` flag is returned.
     """
-    db_info = config_db.get_connection(database_alias)
-    if not db_info:
+    stored = config_db.get_connection(database_alias)
+    if not stored:
         raise ValueError(f"Database alias '{database_alias}' not found in configuration.")
 
-    db_type = db_info.get("type")
+    db_type = stored.get("type")
+    db_info = resolve_secrets(stored)
     cap = min(int(limit), security.max_rows())
     if cap < 1:
         cap = 1

@@ -53,25 +53,33 @@ Full client matrix and a local-checkout variant: [`examples/mcp-clients/README.m
 
 ## Configure connections
 
-The server starts empty. Add connections via the CLI (or the `db_add_database` tool).
-Credentials are written to local SQLite and never re-sent to the model.
+**Configure connections from your terminal with the CLI — never through the agent.**
+A connection's password is a real secret; if it were passed as an MCP tool argument it
+would enter the model's context (and the provider, transcripts, and logs). So the
+credential-management tools are **off the MCP surface by default**; provisioning is a
+human/CLI task. The agent only lists and uses aliases.
+
+Omit `--password`/`--uri` to be prompted securely (hidden input, not stored in shell
+history). Even better, keep the secret out of the config file entirely with
+`--password-env` / `--password-file` (resolved at connection time):
 
 ```bash
-# PostgreSQL
+# PostgreSQL — prompted for the password (recommended)
 uvx custom-mcp-database add-db --alias pg --type postgres \
-  --host localhost --port 5432 --user me --password secret --dbname app
+  --host localhost --port 5432 --user me --dbname app
 
-# MySQL
-uvx custom-mcp-database add-db --alias my --type mysql \
-  --host localhost --port 3306 --user root --password secret --dbname app
+# MySQL — password taken from an env var at connect time (nothing secret on disk)
+MYSQL_PW=... uvx custom-mcp-database add-db --alias my --type mysql \
+  --host localhost --port 3306 --user root --dbname app --password-env MYSQL_PW
 
-# Oracle
+# Oracle — password read from a file (e.g. a mounted secret)
 uvx custom-mcp-database add-db --alias ora --type oracle \
-  --host db.example.com --port 1521 --user system --password pw --dbname ORCLPDB1
+  --host db.example.com --port 1521 --user system --dbname ORCLPDB1 \
+  --password-file /run/secrets/ora_pw
 
-# MongoDB
+# MongoDB — full URI from a file (the URI embeds credentials)
 uvx custom-mcp-database add-db --alias mongo --type mongo \
-  --uri "mongodb+srv://user:pw@cluster.mongodb.net/" --dbname app
+  --dbname app --uri-file /run/secrets/mongo_uri
 
 uvx custom-mcp-database list-aliases
 uvx custom-mcp-database remove-db --alias pg
@@ -79,10 +87,12 @@ uvx custom-mcp-database remove-db --alias pg
 
 Config location (override with `MCP_DB_CONFIG`):
 `$XDG_CONFIG_HOME/custom-mcp-database/mcp_config.sqlite3`
-(default `~/.config/custom-mcp-database/mcp_config.sqlite3`).
+(default `~/.config/custom-mcp-database/mcp_config.sqlite3`, `0600`).
 
-> Credentials are stored as **plaintext JSON** in that SQLite file. Keep it secret;
-> it is not committed and not encrypted.
+> If you pass a literal `--password`/`--uri`, it is stored as **plaintext JSON** in that
+> SQLite file. Prefer `--password-env`/`--password-file` (or `--uri-env`/`--uri-file`) so
+> only a reference is stored. Either way, keep the file secret (it is `0600`, gitignored,
+> not encrypted).
 
 ---
 
@@ -91,11 +101,13 @@ Config location (override with `MCP_DB_CONFIG`):
 | Tool | Purpose |
 | --- | --- |
 | `db_list_aliases` | List configured aliases and types |
-| `db_add_database` | Add/replace a connection |
-| `db_remove_database` | Remove a connection |
 | `db_execute_query` | Run SQL or a MongoDB JSON filter |
 | `db_list_collections` | List MongoDB collections |
 | `db_security_status` | Report the active security policy |
+
+`db_add_database` / `db_remove_database` are **not exposed over MCP by default** — manage
+connections with the CLI. To opt into exposing them (the add tool only accepts secrets by
+reference, never a literal password), set `MCP_DB_ALLOW_ADMIN_TOOLS=1`.
 
 `db_execute_query` notes: SQL runs as given with parameterized binds (add your own
 `LIMIT`); MongoDB takes a JSON filter + `collection`, caps results at 10 (`--limit`),

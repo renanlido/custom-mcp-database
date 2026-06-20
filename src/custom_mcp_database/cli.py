@@ -1,6 +1,7 @@
 """Command-line interface for managing connections and running the MCP server."""
 
 import argparse
+import getpass
 import json
 
 from . import config_db, core
@@ -58,9 +59,17 @@ NOTES:
     p_add.add_argument("--host", help="DB host (not for mongo)")
     p_add.add_argument("--port", type=int, help="DB port (not for mongo)")
     p_add.add_argument("--user", help="DB user (not for mongo)")
-    p_add.add_argument("--password", help="DB password (not for mongo)")
+    p_add.add_argument(
+        "--password",
+        help="DB password (SQL). Omit to be prompted securely (recommended). "
+        "Prefer --password-env/--password-file to avoid storing plaintext.",
+    )
+    p_add.add_argument("--password-env", dest="password_env", help="Env var name holding the password")
+    p_add.add_argument("--password-file", dest="password_file", help="File path holding the password")
     p_add.add_argument("--dbname", help="DB name (all types)")
-    p_add.add_argument("--uri", help="MongoDB connection URI")
+    p_add.add_argument("--uri", help="MongoDB connection URI (omit to be prompted securely)")
+    p_add.add_argument("--uri-env", dest="uri_env", help="Env var name holding the MongoDB URI")
+    p_add.add_argument("--uri-file", dest="uri_file", help="File path holding the MongoDB URI")
 
     p_rm = sub.add_parser("remove-db", help="Remove a database connection")
     p_rm.add_argument("--alias", required=True, help="Alias of the connection to remove")
@@ -93,10 +102,21 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "add-db":
+        password = args.password
+        uri = args.uri
+        # Prompt securely when no secret (literal or reference) was supplied.
+        if args.type in ("postgres", "mysql", "oracle"):
+            if not (password or args.password_env or args.password_file):
+                password = getpass.getpass(f"Password for '{args.alias}': ")
+        elif args.type == "mongo":
+            if not (uri or args.uri_env or args.uri_file):
+                uri = getpass.getpass(f"MongoDB URI for '{args.alias}': ")
         try:
             result = core.add_database(
                 args.alias, args.type, args.host, args.port, args.user,
-                args.password, args.dbname, args.uri,
+                password=password, dbname=args.dbname, uri=uri,
+                password_env=args.password_env, password_file=args.password_file,
+                uri_env=args.uri_env, uri_file=args.uri_file,
             )
             print(result["status"])
         except ValueError as e:
