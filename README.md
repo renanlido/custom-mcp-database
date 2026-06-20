@@ -13,6 +13,47 @@ any other MCP client (all use the same stdio launch command).
 
 ---
 
+## Quickstart
+
+There are **two roles**, on purpose. Keeping them separate is what stops your DB
+password from ever reaching the model.
+
+### You (once, in your terminal) — install the credentials
+
+The **agent never installs credentials.** You do, with the CLI. The secret stays on
+your machine and is never sent to the model.
+
+```bash
+# 1. add a connection (you'll be prompted for the password — hidden input)
+uvx custom-mcp-database add-db --alias prod_ro --type postgres \
+  --host db.internal --port 5432 --user reporting --dbname app
+
+# 2. confirm it's there
+uvx custom-mcp-database list-aliases
+```
+
+### The agent (always) — uses it by alias
+
+Point your MCP client at the server (see [Install](#install)), then just ask:
+
+> "Using **prod_ro**, run `SELECT count(*) FROM orders`."
+
+The agent calls `db_execute_query` with the **alias** `prod_ro` — never a host, user,
+or password. It physically cannot see the credentials; they live in your local config,
+resolved only inside the server process at query time.
+
+**Why the agent can't add the DB:** an MCP tool's arguments are produced and read by the
+LLM. If the agent typed your password into an `add` tool, that password would land in the
+model's context, the provider, and the logs. So credential setup is a human/CLI step by
+design. (Need an agent to wire connections in an automated pipeline? See
+`MCP_DB_ALLOW_ADMIN_TOOLS` in [SECURITY.md](SECURITY.md) — even then it only accepts a
+*reference* to a secret, e.g. an env-var name, never the secret itself.)
+
+Writes are **off by default** (read-only). To allow them for a task:
+`export MCP_DB_READONLY=0 MCP_DB_ALLOW_WRITES=1`.
+
+---
+
 ## Install
 
 The server runs over **stdio**. The universal launch command is `uvx custom-mcp-database run`
