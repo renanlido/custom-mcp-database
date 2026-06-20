@@ -9,7 +9,7 @@
       "name": "custom-mcp-database",
       "source": "./",
       "description": "MCP server for secure, alias-based access to PostgreSQL, MySQL, MongoDB and Oracle.",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "author": {
         "name": "Renan Oliveira"
       }

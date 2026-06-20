@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.1] - 2026-06-20
+
+### Fixes
+- preserve special characters in password/uri files (trim only one trailing newline)
+
 ## [0.6.0] - 2026-06-20
 
 ### Features
