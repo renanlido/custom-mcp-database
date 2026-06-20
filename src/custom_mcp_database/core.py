@@ -131,9 +131,16 @@ def _resolve_ref(d: dict[str, Any], label: str) -> None:
         d[label] = val
     elif file is not None:
         try:
-            d[label] = Path(file).expanduser().read_text(encoding="utf-8").strip()
+            raw = Path(file).expanduser().read_text(encoding="utf-8")
         except OSError as e:
             raise RuntimeError(f"Could not read {label} file '{file}': {e}") from None
+        # Trim only a single trailing newline (from `echo`/editors); preserve every
+        # other character, including spaces and shell-special chars inside the secret.
+        if raw.endswith("\r\n"):
+            raw = raw[:-2]
+        elif raw.endswith("\n"):
+            raw = raw[:-1]
+        d[label] = raw
 
 
 def resolve_secrets(db_info: dict[str, Any]) -> dict[str, Any]:

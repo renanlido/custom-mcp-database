@@ -61,6 +61,24 @@ def test_resolve_password_from_file(tmp_path):
     assert resolved["conn_params"]["password"] == "filepass"
 
 
+def test_resolve_password_file_preserves_special_chars(tmp_path):
+    # Shell-special chars and surrounding spaces must survive; only one trailing
+    # newline is trimmed.
+    secret = r" p@$$w0rd!\ with \"quotes\" and `ticks` "
+    f = tmp_path / "pw"
+    f.write_text(secret + "\n", encoding="utf-8")
+    stored = {"type": "postgres", "conn_params": {"user": "u", "password_file": str(f)}}
+    resolved = core.resolve_secrets(stored)
+    assert resolved["conn_params"]["password"] == secret
+
+
+def test_resolve_password_file_no_trailing_newline(tmp_path):
+    f = tmp_path / "pw"
+    f.write_text("exact", encoding="utf-8")  # printf '%s' style, no newline
+    stored = {"type": "postgres", "conn_params": {"user": "u", "password_file": str(f)}}
+    assert core.resolve_secrets(stored)["conn_params"]["password"] == "exact"
+
+
 def test_resolve_missing_env_raises(monkeypatch):
     monkeypatch.delenv("NOPE", raising=False)
     stored = {"type": "postgres", "conn_params": {"user": "u", "password_env": "NOPE"}}
