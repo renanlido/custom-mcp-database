@@ -100,6 +100,18 @@ Writes against production require a **deliberate** `MCP_DB_READONLY=0` +
 - They do not parse every SQL dialect perfectly. The DB-level read-only role is the
   authoritative backstop.
 
+## Automated scanning
+
+CI runs continuous security checks so regressions surface early:
+
+- **CodeQL** (`security-extended`) — static analysis on push/PR and weekly.
+- **Dependabot** — weekly CVE alerts + update PRs for Python deps and GitHub Actions.
+- **pip-audit** — fails CI if a dependency has a known vulnerability.
+- **gitleaks** — fails CI if a secret is committed.
+
+These complement, but do not replace, the runtime guards and the least-privilege
+database account.
+
 ## Reporting a vulnerability
 
 Do not open a public issue for security reports. Use **GitHub → Security → Report a
