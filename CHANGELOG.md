@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [0.6.0] - 2026-06-20
+
+### Features
+- add interactive 'setup' wizard for guided, secret-safe connection creation
+
 ## [0.5.1] - 2026-06-20
 
 ### Other
