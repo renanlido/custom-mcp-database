@@ -1,7 +1,7 @@
 {
   "name": "custom-mcp-database",
   "displayName": "Custom MCP Database",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Run alias-based queries against PostgreSQL, MySQL, MongoDB and Oracle without exposing credentials.",
   "author": {
     "name": "Renan Oliveira",
