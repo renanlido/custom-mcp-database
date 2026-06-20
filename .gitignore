@@ -133,3 +133,6 @@ cython_debug/
 mcp_config.sqlite3
 mcp_config.sqlite3-shm
 mcp_config.sqlite3-wal
+# MCP bundles
+*.mcpb
+*.dxt

@@ -1,203 +1,164 @@
-# MCP Database Server
+# Custom MCP Database
 
-This project provides a Middleware/Control Plane (MCP) server that allows code agents (like Gemini, Claude Desktop, and Claude Code) to securely execute queries against various databases (PostgreSQL, MySQL, MongoDB, Oracle) without directly exposing credentials. Database connection configurations are managed within an SQLite database (`mcp_config.sqlite3`).
+An [MCP](https://modelcontextprotocol.io) server that lets AI agents run **alias-based**
+queries against **PostgreSQL, MySQL, MongoDB and Oracle** — without ever exposing
+credentials to the model. Connections are configured once and stored locally; the
+agent only ever references them by alias.
 
-## 1. Installation
+Works with Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, and
+any other MCP client (all use the same stdio launch command).
 
-To set up the project, follow these steps:
+---
 
-1. **Clone the repository** (if you haven't already):
+## Install
 
-    ```bash
-    git clone <repository_url>
-    cd custom-mcp-database
-    ```
+The server runs over **stdio**. The universal launch command is `uvx custom-mcp-database run`
+(requires [uv](https://docs.astral.sh/uv/); the package is fetched from PyPI on first run).
 
-2. **Install dependencies**:
-    This project uses a `venv` (virtual environment) to manage dependencies. Run the following command to create the virtual environment and install the required Python packages:
-
-    ```bash
-    make install
-    ```
-
-    This will create a `venv/` directory and install everything listed in `requirements.txt`.
-
-## 2. Running the MCP Server
-
-To start the MCP server, use the `make run` command:
+### Claude Code
 
 ```bash
-make run
+# Direct (published package)
+claude mcp add custom-mcp-database -- uvx custom-mcp-database run
+
+# Or install the full plugin from this repo's marketplace
+/plugin marketplace add renanlido/custom-mcp-database
+/plugin install custom-mcp-database@renanlido-mcp
 ```
-
-The server will start and listen for incoming requests from your code agents.
-
-## 3. Database Configuration
-
-Database connections are stored in `mcp_config.sqlite3`. You can manage these connections using the global `mcp-db` command (recommended) or the local `main.py` script.
-
-### Adding a Database Connection
-
-Use the `add-db` command. The required parameters vary by database type.
-
-**General Syntax (Global Command - Recommended):**
-
-```bash
-mcp-db add-db --alias <alias> --type <type> [connection_parameters]
-```
-
-**Alternative (Local Command):**
-
-```bash
-python main.py add-db --alias <alias> --type <type> [connection_parameters]
-```
-
-**Examples (Global Command):**
-
-* **PostgreSQL**:
-
-    ```bash
-    mcp-db add-db --alias pg_dev --type postgres --host localhost --port 5432 --user myuser --password mypassword --dbname mydb
-    ```
-
-* **MySQL**:
-
-    ```bash
-    mcp-db add-db --alias mysql_prod --type mysql --host 192.168.1.10 --port 3306 --user root --password secret --dbname production_db
-    ```
-
-* **Oracle**:
-
-    ```bash
-    mcp-db add-db --alias oracle_test --type oracle --host oracle.example.com --port 1521 --user system --password oraclepass --dbname ORCLPDB1
-    ```
-
-* **MongoDB**:
-
-    ```bash
-    mcp-db add-db --alias mongo_cluster --type mongo --uri "mongodb+srv://user:pass@cluster.mongodb.net/" --dbname myapp_db
-    ```
-
-### Removing a Database Connection
-
-Use the `remove-db` command with the alias of the connection you want to remove:
-
-**Global Command:**
-```bash
-mcp-db remove-db --alias <alias>
-```
-
-**Local Command:**
-```bash
-python main.py remove-db --alias <alias>
-```
-
-**Example:**
-
-```bash
-mcp-db remove-db --alias pg_dev
-```
-
-### Getting Help
-
-For detailed help and examples:
-
-```bash
-mcp-db --help
-mcp-db execute-query --help
-```
-
-## 4. Integration with Code Agents
-
-### Gemini
-
-Once the MCP server is running (`make run`), Gemini will automatically discover and make the following tools available for interacting with your configured databases:
-
-* `list_aliases()`: Lists all configured database aliases.
-* `add_database(...)`: Adds a new database connection.
-* `remove_database(...)`: Removes a database connection.
-* `execute_query(database_alias, query, params, schema)`: Executes a query against a configured database.
-
-**Gemini Usage Examples:**
-
-* **List aliases:**
-
-    ```
-    list_aliases()
-    ```
-
-* **Execute a SQL query (PostgreSQL/MySQL/Oracle):**
-
-    ```
-    execute_query(database_alias="pg_dev", query="SELECT * FROM users WHERE id = %s;", params={"id": 1})
-    ```
-
-* **Execute a MongoDB query:**
-
-    ```
-    execute_query(database_alias="mongo_cluster", query='''{"name": "John Doe"}''', params={"collection": "users"})
-    ```
 
 ### Claude Desktop
 
-To integrate with Claude Desktop, you need to configure its `claude_desktop_config.json` file to point to your MCP server. Create or modify this file (usually located in your Claude Desktop configuration directory) with an entry similar to this:
+Two options:
 
-```json
-{
-  "mcpServers": {
-    "Custom DB Server": {
-      "command": "/your-path-to/custom-mcp-database/venv/bin/python",
-      "args": [
-        "/your-path-to/custom-mcp-database/main.py"
-      ],
-      "workingDirectory": "/your-path-to/custom-mcp-database"
-    }
-  }
-}
+1. **One-click bundle** — build the `.mcpb` (`mcpb pack`) and open it in Claude Desktop. See [Distribution](#distribution).
+2. **Manual config** — add the snippet from [`examples/mcp-clients/claude-desktop.json`](examples/mcp-clients/claude-desktop.json) to `claude_desktop_config.json`.
+
+### Other clients
+
+Copy the matching snippet — all use the same `command`/`args`, only the file and key differ:
+
+| Client | Config file | Key | Snippet |
+| --- | --- | --- | --- |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` | [cursor.json](examples/mcp-clients/cursor.json) |
+| VS Code | `.vscode/mcp.json` | `servers` | [vscode.json](examples/mcp-clients/vscode.json) |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` | [windsurf.json](examples/mcp-clients/windsurf.json) |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | [gemini-cli.json](examples/mcp-clients/gemini-cli.json) |
+
+Full client matrix and a local-checkout variant: [`examples/mcp-clients/README.md`](examples/mcp-clients/README.md).
+
+---
+
+## Configure connections
+
+The server starts empty. Add connections via the CLI (or the `db_add_database` tool).
+Credentials are written to local SQLite and never re-sent to the model.
+
+```bash
+# PostgreSQL
+uvx custom-mcp-database add-db --alias pg --type postgres \
+  --host localhost --port 5432 --user me --password secret --dbname app
+
+# MySQL
+uvx custom-mcp-database add-db --alias my --type mysql \
+  --host localhost --port 3306 --user root --password secret --dbname app
+
+# Oracle
+uvx custom-mcp-database add-db --alias ora --type oracle \
+  --host db.example.com --port 1521 --user system --password pw --dbname ORCLPDB1
+
+# MongoDB
+uvx custom-mcp-database add-db --alias mongo --type mongo \
+  --uri "mongodb+srv://user:pw@cluster.mongodb.net/" --dbname app
+
+uvx custom-mcp-database list-aliases
+uvx custom-mcp-database remove-db --alias pg
 ```
 
-**Important:** Replace `/your-path-to/custom-mcp-database` with the actual absolute path to your `custom-mcp-database` directory.
+Config location (override with `MCP_DB_CONFIG`):
+`$XDG_CONFIG_HOME/custom-mcp-database/mcp_config.sqlite3`
+(default `~/.config/custom-mcp-database/mcp_config.sqlite3`).
 
-After configuring, restart Claude Desktop. The MCP tools will then be available for use within Claude Desktop.
+> Credentials are stored as **plaintext JSON** in that SQLite file. Keep it secret;
+> it is not committed and not encrypted.
 
-### Tool Configuration for AI Agents
+---
 
-To enable AI agents like Claude Code and Gemini to automatically discover and utilize the MCP server's tools, you need to configure them to launch or connect to the MCP server. This typically involves providing the path to the `main.py` script and specifying the working directory.
+## MCP tools
 
-Here are examples of how you might configure your AI agent's `mcpServers` section:
+| Tool | Purpose |
+| --- | --- |
+| `db_list_aliases` | List configured aliases and types |
+| `db_add_database` | Add/replace a connection |
+| `db_remove_database` | Remove a connection |
+| `db_execute_query` | Run SQL or a MongoDB JSON filter |
+| `db_list_collections` | List MongoDB collections |
 
-#### For Claude Code
+`db_execute_query` notes: SQL runs as given with parameterized binds (add your own
+`LIMIT`); MongoDB takes a JSON filter + `collection`, caps results at 10 (`--limit`),
+rejects empty filters, and coerces 24-char hex strings to `ObjectId`.
 
-```json
-{
-  "mcpServers": {
-    "Custom DB Server": {
-      "command": "/your-path-to/custom-mcp-database/venv/bin/python",
-      "args": [
-        "/your-path-to/custom-mcp-database/main.py"
-      ],
-      "workingDirectory": "/your-path-to/custom-mcp-database"
-    }
-  }
-}
+---
+
+## Develop
+
+```bash
+uv sync                 # create .venv and install deps
+make run                # run the server (stdio)
+make lint               # ruff
+make build              # sdist + wheel into dist/
 ```
 
-#### For Gemini
+Inspect tools interactively:
 
-```json
-{
-  "mcpServers": {
-    "Custom DB Server": {
-      "command": "/your-path-to/custom-mcp-database/venv/bin/python",
-      "args": [
-        "/your-path-to/custom-mcp-database/main.py"
-      ],
-      "workingDirectory": "/your-path-to/custom-mcp-database"
-    }
-  }
-}
+```bash
+uv run mcp dev src/custom_mcp_database/server.py
 ```
 
-**Important:** Replace `/your-path-to/custom-mcp-database` with the actual absolute path to your `custom-mcp-database` directory.
+---
 
-Refer to your specific AI agent's official documentation for the most accurate and up-to-date instructions on configuring external MCP servers.
+## Distribution
+
+This repo ships ready-to-publish metadata for every major channel. All of it is
+published automatically on push to `main` (see below):
+
+| Channel | File | Published by |
+| --- | --- | --- |
+| PyPI | `pyproject.toml` | `release.yml` (push to main) |
+| MCP Registry | `server.json` | `release.yml` (push to main) |
+| Claude Code plugin | `.claude-plugin/plugin.json`, `.mcp.json` | available on GitHub push |
+| Claude Code marketplace | `.claude-plugin/marketplace.json` | available on GitHub push |
+| Claude Desktop bundle | `manifest.json` | `release.yml` attaches `.mcpb` to the Release |
+
+### Automated release — just push to `main`
+
+Releases are fully automated. On every push to `main`,
+[`.github/workflows/release.yml`](.github/workflows/release.yml):
+
+1. Picks the next **semantic version** from your commits since the last tag
+   (`feat:` → minor, `BREAKING CHANGE`/`type!:` → major, anything else → patch;
+   add `[skip release]` to a commit message to skip).
+2. Writes that version into `pyproject.toml` and **syncs it into every artifact**
+   (`server.json`, `manifest.json`, plugin + marketplace) via `scripts/sync_version.py` —
+   version lives in **one place**, no hand-bumping.
+3. Builds, commits `chore(release): vX [skip ci]`, tags `vX`, pushes.
+4. Publishes to **PyPI** (Trusted Publishing/OIDC), then the **MCP Registry** (GitHub OIDC).
+5. Packs the **`.mcpb`** and cuts a **GitHub Release** with the wheel + bundle attached.
+
+The release commit carries `[skip ci]`, so it does not re-trigger the workflow.
+
+**One-time setup** (can't be automated — needs your accounts):
+
+- Create a [PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/) for
+  `renanlido/custom-mcp-database`, workflow `release.yml`.
+- Allow GitHub Actions to push to `main` (repo → Settings → Actions → *Read and write
+  permissions*; if `main` is a protected branch, allow the actions bot to bypass or use a PAT).
+
+The MCP Registry namespace is `io.github.renanlido/custom-mcp-database` (GitHub-validated).
+
+Local manual escape hatch: `make build` (syncs version + builds) then `uv publish`.
+
+---
+
+## License
+
+MIT

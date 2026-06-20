@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Lint
+        run: uvx ruff check .
+
+      - name: Build
+        run: uv build
+
+      - name: Smoke test (import + tool registration)
+        run: |
+          uv run --no-project --with ./dist/*.whl python -c "
+          import custom_mcp_database as p
+          from custom_mcp_database import server, cli, core, config_db
+          tools = sorted(t.name for t in server.mcp._tool_manager.list_tools())
+          assert tools == ['db_add_database','db_execute_query','db_list_aliases','db_list_collections','db_remove_database'], tools
+          print('ok', p.__version__, tools)
+          "

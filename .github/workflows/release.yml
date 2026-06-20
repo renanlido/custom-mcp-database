@@ -1,0 +1,87 @@
+name: Release
+
+# Push to main = full automated release:
+#   bump (semantic) -> sync version into all artifacts -> build -> commit+tag+push
+#   -> publish to PyPI (OIDC) -> publish to MCP Registry -> build .mcpb
+#   -> create GitHub Release with assets.
+# The release commit carries [skip ci], so the push it makes does NOT loop.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write   # push the release commit + tag, create the GitHub Release
+      id-token: write   # PyPI Trusted Publishing + MCP Registry GitHub OIDC
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need full history + tags for semantic bump
+          persist-credentials: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Decide next version
+        id: bump
+        run: uv run --no-project python scripts/bump_version.py
+
+      - name: Sync version into artifacts
+        if: steps.bump.outputs.bumped == 'true'
+        run: uv run --no-project python scripts/sync_version.py
+
+      - name: Lint + build
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          uvx ruff check .
+          uv build
+
+      - name: Commit, tag and push
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          V="${{ steps.bump.outputs.version }}"
+          git add pyproject.toml server.json manifest.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git commit -m "chore(release): v${V} [skip ci]"
+          git tag "v${V}"
+          git push origin HEAD:main
+          git push origin "v${V}"
+
+      - name: Publish to PyPI
+        if: steps.bump.outputs.bumped == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Publish to MCP Registry
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
+
+      - name: Build Claude Desktop bundle (.mcpb)
+        if: steps.bump.outputs.bumped == 'true'
+        run: npx --yes @anthropic-ai/mcpb pack . "custom-mcp-database-${{ steps.bump.outputs.version }}.mcpb"
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.bumped == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.bump.outputs.version }}"
+          generate_release_notes: true
+          files: |
+            dist/*
+            custom-mcp-database-${{ steps.bump.outputs.version }}.mcpb

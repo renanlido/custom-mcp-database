@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "custom-mcp-database": {
+      "command": "uvx",
+      "args": ["custom-mcp-database", "run"]
+    }
+  }
+}

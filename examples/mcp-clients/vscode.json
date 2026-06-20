@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "custom-mcp-database": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["custom-mcp-database", "run"]
+    }
+  }
+}

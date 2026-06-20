@@ -1,0 +1,39 @@
+{
+  "manifest_version": "0.3",
+  "name": "custom-mcp-database",
+  "display_name": "Custom MCP Database",
+  "version": "0.2.0",
+  "description": "Run alias-based queries against PostgreSQL, MySQL, MongoDB and Oracle without exposing credentials.",
+  "author": {
+    "name": "Renan Oliveira",
+    "url": "https://github.com/renanlido"
+  },
+  "homepage": "https://github.com/renanlido/custom-mcp-database",
+  "license": "MIT",
+  "keywords": [
+    "database",
+    "postgresql",
+    "mysql",
+    "mongodb",
+    "oracle"
+  ],
+  "server": {
+    "type": "python",
+    "entry_point": "main.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "${__dirname}",
+        "custom-mcp-database",
+        "run"
+      ]
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

@@ -4,84 +4,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Model Context Protocol (MCP) Server that provides a secure middleware layer for AI agents to execute database queries. It supports PostgreSQL, MySQL, MongoDB, and Oracle databases using an alias-based configuration system stored in SQLite.
+An MCP server that acts as a secure middleware so AI agents can run database queries without seeing raw credentials. Supports PostgreSQL, MySQL, MongoDB, and Oracle. Connections are referenced by alias; the alias→credentials mapping lives in a local SQLite file.
+
+The same entry point serves as both the MCP server (stdio) and a connection-management CLI. It is packaged for distribution across every major MCP client.
+
+## Layout
+
+```
+src/custom_mcp_database/
+  core.py        # pure logic: validation, query execution per driver (no MCP/CLI coupling)
+  server.py      # FastMCP("database_mcp") + db_* tool registration -> calls core
+  cli.py         # argparse CLI (run/add-db/remove-db/list-aliases/execute-query/list-collections)
+  config_db.py   # SQLite alias store; DB path resolved to a user config dir
+  __main__.py    # python -m custom_mcp_database
+main.py          # back-compat shim (adds src/ to path, calls cli.main) for old client configs
+```
+
+Distribution metadata (one file per channel): `pyproject.toml` (PyPI), `server.json` (MCP Registry), `.claude-plugin/plugin.json` + `.mcp.json` (Claude Code plugin), `.claude-plugin/marketplace.json` (marketplace), `manifest.json` (Claude Desktop MCPB). Client config snippets in `examples/mcp-clients/`.
 
 ## Commands
 
-### Development
 ```bash
-make install    # Install dependencies in virtual environment
-make run        # Start the MCP server (runs ./venv/bin/python main.py)
+uv sync                 # install deps into .venv  (make install)
+make run                # run the server: uv run custom-mcp-database run
+make lint               # uvx ruff check .
+make build              # uv build -> dist/  (sdist + wheel)
+uv run mcp dev src/custom_mcp_database/server.py   # MCP Inspector
+
+# CLI (also: python -m custom_mcp_database, or uvx custom-mcp-database)
+uv run custom-mcp-database add-db --alias <name> --type <postgres|mysql|mongo|oracle> [conn flags]
+uv run custom-mcp-database execute-query --database_alias <alias> --query <q> [--params <json>] [--collection <c>] [--limit N]
 ```
 
-### CLI Database Management (Global Command)
+Smoke test (no DB needed) — build then import + assert tool set:
 ```bash
-# Global command available from anywhere (recommended)
-mcp-db --help  # Show all available commands with examples
-
-# Add database connection
-mcp-db add-db --alias <name> --type <postgres|mysql|mongo|oracle> --host <host> --port <port> --user <user> --password <password> --dbname <dbname> [--uri <mongo_uri>]
-
-# Remove database connection
-mcp-db remove-db --alias <name>
-
-# List all configured databases
-mcp-db list-aliases
-
-# Execute query (MongoDB queries automatically convert ObjectId strings)
-mcp-db execute-query --database_alias <alias> --query <query> [--params '{"key": "value"}'] [--collection <name>] [--oracle_schema <schema>]
-
-# List MongoDB collections
-mcp-db list-collections --database_alias <alias>
+uv build
+uv run --no-project --with ./dist/*.whl python -c "from custom_mcp_database import server; print(sorted(t.name for t in server.mcp._tool_manager.list_tools()))"
 ```
+There is no DB-backed test suite (queries need live databases).
 
-### CLI Database Management (Local Command)
-```bash
-# Alternative: Local command (requires being in project directory)
-python main.py add-db --alias <name> --type <postgres|mysql|mongo|oracle> --host <host> --port <port> --user <user> --password <password> --dbname <dbname> [--uri <mongo_uri>]
-python main.py remove-db --alias <name>
-python main.py list-aliases
-python main.py execute-query --database_alias <alias> --query <query> [--params '{"key": "value"}'] [--collection <name>] [--oracle_schema <schema>]
-python main.py list-collections --database_alias <alias>
-```
+## Architecture — non-obvious details
 
-## Architecture
+These require reading `core.py` + `config_db.py` together and are the main sources of confusion:
 
-### Core Components
-- `main.py:1-629` - Main application with MCP server implementation and CLI interface
-  - MCP server setup: `main.py:567-629`
-  - CLI commands: `main.py:398-565`
-  - Database query execution: `main.py:136-395`
-- `config_db.py:1-107` - SQLite-based configuration management for database connections
-  - Connection storage: `config_db.py:19-65`
-  - Connection retrieval: `config_db.py:67-107`
+1. **Three-layer split.** `core.py` holds the only query logic; `server.py` and `cli.py` are thin adapters that both call `core`. Add behavior in `core.py`, expose it in both adapters. Do NOT call the `@mcp.tool`-decorated functions from the CLI — they are FunctionTool objects, not plain callables; use the `core.*` functions.
 
-### Key Design Patterns
-1. **Dual Mode Operation**: Single entry point serves as both MCP server and CLI tool
-2. **Configuration Storage**: SQLite database (`mcp_config.sqlite3`) stores encrypted connection details
-3. **Unified Query Interface**: Common `execute_query` method handles all database types
-4. **Tool-based Architecture**: MCP tools expose database operations to AI agents
+2. **Per-driver param shapes** ([core.py:60-83](src/custom_mcp_database/core.py:60), `build_and_validate_params`). MySQL stores the db name as `database`; postgres/oracle as `dbname`; oracle collapses host/port/dbname into a single `dsn` (`host:port/dbname`); mongo stores `{uri, dbname}` and ignores host/port/user/password.
 
-### Database Support
-- **SQL Databases** (PostgreSQL, MySQL, Oracle): Standard SQL with parameterized queries
-- **MongoDB**: JSON-based queries with collection specification
-- **Oracle**: Additional schema switching capability
+3. **`get_connection` returns two shapes** ([config_db.py:64](src/custom_mcp_database/config_db.py:64)) that `execute_query` branches on: mongo → `{type, uri, dbname}`; SQL → `{type, conn_params}` spread into `driver.connect(**conn_params)`.
 
-## MCP Tools Exposed
+4. **MongoDB specifics** ([core.py `execute_query`](src/custom_mcp_database/core.py)): `collection` required; empty/`{}` filter rejected; results capped at `limit` (default 10); 24-char hex strings auto-coerced to `ObjectId` via `convert_objectid_strings` (a legitimate 24-char string value becomes an ObjectId). SQL is NOT row-limited by this code.
 
-1. `list_aliases()` - Returns all configured database aliases
-2. `add_database(...)` - Adds new database connection
-3. `remove_database(...)` - Removes database connection
-4. `execute_query(...)` - Executes queries with proper parameterization
-5. `list_collections(...)` - Lists MongoDB collections
+5. **Config DB path** ([config_db.py:8](src/custom_mcp_database/config_db.py:8), `_resolve_db_file`). Resolves to `$MCP_DB_CONFIG`, else `$XDG_CONFIG_HOME/custom-mcp-database/`, else `~/.config/custom-mcp-database/mcp_config.sqlite3`. This is deliberate so `uvx`/ephemeral installs don't lose config into site-packages. Never hard-code the repo dir.
 
-## Important Notes
+## Storage & Security
 
-- Database credentials are stored in `mcp_config.sqlite3` (gitignored)
-- Global command `mcp-db` is available from anywhere after installation
-- MongoDB queries automatically convert 24-character strings to ObjectId objects
-- All queries are limited to 10 results by default to prevent large outputs
-- Virtual environment must be activated or use full path to Python executable
-- MongoDB requires either connection URI or standard connection parameters
-- Oracle queries support schema switching via the `schema` parameter
-- All SQL queries support parameterized queries to prevent SQL injection
+- Connection params are stored as **plaintext JSON** in the SQLite config file ([config_db.py `add_connection`](src/custom_mcp_database/config_db.py)). It is gitignored and not encrypted — treat as a secret.
+- SQL uses parameterized binds; oracle uses named binds (`:name`), defaults params to `{}`.
+
+## Distribution invariants
+
+- Server display name is `database_mcp`; MCP tool names are prefixed `db_*`.
+- Registry id is reverse-DNS `io.github.renanlido/custom-mcp-database`.
+- **Version has a single source: `pyproject.toml` `[project].version`.** `scripts/sync_version.py` propagates it into `server.json`, `manifest.json`, `.claude-plugin/plugin.json`, `marketplace.json`. Never hand-edit those version fields; run `make version-sync` (or let CI do it). Add new version-bearing files to `JSON_TARGETS` in that script.
+- The universal client launch command is `uvx custom-mcp-database run` (stdio).
+
+## Release automation
+
+Push to `main` triggers `.github/workflows/release.yml`: `scripts/bump_version.py` picks the next semver from commit subjects since the last `v*` tag (`feat:`→minor, `BREAKING CHANGE`/`type!:`→major, else patch; `[skip release]` opts out), writes it to pyproject, syncs artifacts, builds, commits `chore(release): vX [skip ci]`, tags, pushes, then publishes PyPI (OIDC) + MCP Registry + `.mcpb` + GitHub Release. The `[skip ci]` on the release commit is the loop guard. `ci.yml` runs only on PRs. Do NOT add a `push: main` trigger that builds/publishes elsewhere — it would double-publish.
