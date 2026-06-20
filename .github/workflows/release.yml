@@ -64,14 +64,6 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
-      - name: Publish to MCP Registry
-        if: steps.bump.outputs.bumped == 'true'
-        run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" \
-            | tar -xz mcp-publisher
-          ./mcp-publisher login github-oidc
-          ./mcp-publisher publish
-
       - name: Build Claude Desktop bundle (.mcpb)
         if: steps.bump.outputs.bumped == 'true'
         run: npx --yes @anthropic-ai/mcpb pack . "custom-mcp-database-${{ steps.bump.outputs.version }}.mcpb"
@@ -85,3 +77,19 @@ jobs:
           files: |
             dist/*
             custom-mcp-database-${{ steps.bump.outputs.version }}.mcpb
+
+      # Registry last: its OIDC/namespace checks are the most fragile, and by now
+      # the PyPI version it references is already live.
+      - name: Publish to MCP Registry
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          case "$(uname -m)" in
+            x86_64|amd64) arch=amd64 ;;
+            aarch64|arm64) arch=arm64 ;;
+            *) arch="$(uname -m)" ;;
+          esac
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_${os}_${arch}.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
