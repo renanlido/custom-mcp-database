@@ -1,6 +1,6 @@
 [project]
 name = "custom-mcp-database"
-version = "0.3.1"
+version = "0.3.2"
 description = "MCP server that lets AI agents run read/write queries against PostgreSQL, MySQL, MongoDB and Oracle through alias-based connections, without exposing credentials."
 readme = "README.md"
 requires-python = ">=3.10"
