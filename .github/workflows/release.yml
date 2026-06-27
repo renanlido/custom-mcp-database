@@ -23,7 +23,7 @@ jobs:
       contents: write   # push the release commit + tag, create the GitHub Release
       id-token: write   # PyPI Trusted Publishing + MCP Registry GitHub OIDC
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0          # need full history + tags for semantic bump
           persist-credentials: true
